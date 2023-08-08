@@ -1,6 +1,10 @@
 [package]
 name = "alovak"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
+authors = [
+    "Uladzislau Charniakou <vlobo2004@gmail.com>",
+]
 
 [dependencies]
+ash = { default-features = false, features = ["linked", "debug"] }

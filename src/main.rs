@@ -1,3 +1,5 @@
+pub mod render;
+pub use render::Render;
 fn main() {
-    println!("Hello, alovak!");
+    let _render = Render::new().unwrap();//.expect("Не удалось создать объект рендера");
 }
