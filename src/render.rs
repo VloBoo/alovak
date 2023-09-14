@@ -8,8 +8,10 @@ pub struct Render {}
 
 impl Render {
     pub fn new() -> Result<Self, ()> {
-        RenderBuilder::build();
-        return Err(());
+        match RenderBuilder::build() {
+            Ok(a) => Ok(a),
+            Err(_) => Err(()),
+        }
     }
 }
 
