@@ -8,3 +8,4 @@ authors = [
 
 [dependencies]
 ash = { default-features = false, features = ["linked", "debug"] }
+windows = "0.54.0"
