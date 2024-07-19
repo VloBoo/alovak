@@ -1,6 +1,6 @@
 [package]
 name = "alovak"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 authors = [
     "Uladzislau Charniakou <vlobo2004@gmail.com>",
@@ -8,4 +8,10 @@ authors = [
 
 [dependencies]
 ash = { default-features = false, features = ["linked", "debug"] }
-windows = "0.54.0"
+log = "0.4"
+windows = { version = "*", features = [
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
+casopis = { git = "https://github.com/VloBoo/casopis.git", version = "0.1.0" }
