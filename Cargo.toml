@@ -2,16 +2,20 @@
 name = "alovak"
 version = "0.0.3"
 edition = "2021"
-authors = [
-    "Uladzislau Charniakou <vlobo2004@gmail.com>",
-]
+authors = ["Uladzislau Charniakou <vlobo2004@gmail.com>"]
 
 [dependencies]
-ash = { default-features = false, features = ["linked", "debug"] }
+ash = { default-features = false, features = [
+    "linked",
+    "debug",
+], version = "*" }
 log = "0.4"
 windows = { version = "*", features = [
     "Win32_Graphics_Gdi",
     "Win32_System_LibraryLoader",
     "Win32_UI_WindowsAndMessaging",
 ] }
-casopis = { git = "https://github.com/VloBoo/casopis.git", version = "0.1.0" }
+tokio = { version = "1.38.1", features = ["full"] }
+
+[dev-dependencies]
+casopis = { git = "https://github.com/VloBoo/casopis.git", version = "*" }

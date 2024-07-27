@@ -9,12 +9,12 @@ use std::{
     ffi::{self, c_char},
 };
 
-use crate::window::win32::WindowWin32;
+use crate::{window::win32::WindowWin32, Handle};
 
 pub struct Vulkan {}
 
 impl Vulkan {
-    pub fn init(surface: &WindowWin32) -> Result<Self, ()> {
+    pub fn init(handle: Handle) -> Result<Self, ()> {
         let layer_names = vec![b"VK_LAYER_KHRONOS_validation\0"];
 
         let layers_names_raw: Vec<*const c_char> = layer_names
@@ -22,7 +22,11 @@ impl Vulkan {
             .map(|raw_name| unsafe { ffi::CStr::from_bytes_with_nul_unchecked(raw_name).as_ptr() })
             .collect();
 
-        let extension_names = vec![b"VK_EXT_debug_utils\0  ",b"VK_KHR_win32_surface\0", b"VK_KHR_surface\0      "];
+        let extension_names = vec![
+            b"VK_EXT_debug_utils\0  ",
+            b"VK_KHR_win32_surface\0",
+            b"VK_KHR_surface\0      ",
+        ];
 
         let extensions_names_raw: Vec<*const c_char> = extension_names
             .into_iter()
@@ -39,7 +43,7 @@ impl Vulkan {
         Self::create_debug_utils_messenger(&entry, &instance);
         log::trace!("vulkan debug utils messenger created");
 
-        let surface = Self::create_surface(surface, &entry, &instance).unwrap();
+        let surface = Self::create_surface(&handle, &entry, &instance).unwrap();
         log::trace!("vulkan surface created");
 
         return Ok(Vulkan {});
@@ -76,19 +80,28 @@ impl Vulkan {
     }
 
     fn create_surface(
-        window: &WindowWin32,
+        handle: &Handle,
         entry: &Entry,
         instance: &Instance,
     ) -> Result<SurfaceKHR, vk::Result> {
-        let win32_surface_create_info = vk::Win32SurfaceCreateInfoKHR::default();
-        //win32_surface_create_info.hwnd(window.hwnd as isize);
-        let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
-        return unsafe {
-            win32_surface_loader.create_win32_surface(&win32_surface_create_info, None)
-        };
+        match handle {
+            Handle::Win32(h) => {
+                let win32_surface_create_info =
+                    vk::Win32SurfaceCreateInfoKHR::default().hwnd(h.0 as isize);
+                let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
+                return unsafe {
+                    win32_surface_loader.create_win32_surface(&win32_surface_create_info, None)
+                };
+            }
+            _ => {
+                unimplemented!();
+            }
+        }
     }
 
-    fn create_device() {}
+    fn create_device() {
+        
+    }
 
     fn create_debug_utils_messenger(entry: &Entry, instance: &Instance) {
         let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::default()

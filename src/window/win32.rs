@@ -1,12 +1,17 @@
 use windows::{
-    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::ValidateRect,
-    Win32::System::LibraryLoader::GetModuleHandleA, Win32::UI::WindowsAndMessaging::*,
+    core::*,
+    Win32::{
+        self, Foundation::*, Graphics::Gdi::ValidateRect, System::LibraryLoader::GetModuleHandleA,
+        UI::WindowsAndMessaging::*,
+    },
 };
 
-use super::Window;
+use crate::error::{Error, Result};
+
+use super::{Handle, Window};
 
 pub struct WindowWin32 {
-    pub hwnd: HWND
+    pub hwnd: HWND,
 }
 
 impl WindowWin32 {
@@ -36,10 +41,8 @@ impl WindowWin32 {
             }
         }
     }
-}
 
-impl Window for WindowWin32 {
-     fn create(title: &str) -> std::result::Result<WindowWin32, &str> {
+    pub fn create(title: &str) -> Result<Self> {
         unsafe {
             let instance = GetModuleHandleA(None).unwrap();
             let window_class = PCSTR::from_raw(title.as_bytes().as_ptr());
@@ -73,14 +76,23 @@ impl Window for WindowWin32 {
             )
             .unwrap();
 
-            log::warn!("{:?}",hwnd);
+            tokio::spawn(async {
+                log::warn!("TICK START");
+                let mut message = MSG::default();
+                while GetMessageA(&mut message, None, 0, 0).into() {
+                    log::trace!("{:?}", message);
+                    DispatchMessageA(&message);
+                }
+                log::warn!("TICK END");
+            });
 
-            let mut message = MSG::default();
-
-            while GetMessageA(&mut message, None, 0, 0).into() {
-                DispatchMessageA(&message);
-            }
-            Ok(WindowWin32 {hwnd})
+            Ok(WindowWin32 { hwnd })
         }
+    }
+}
+
+impl Window for WindowWin32 {
+    fn handle(self) -> Result<Handle> {
+        Ok(Handle::Win32(self.hwnd))
     }
 }
