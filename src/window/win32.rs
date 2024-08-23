@@ -43,50 +43,53 @@ impl WindowWin32 {
     }
 
     pub fn create(title: &str) -> Result<Self> {
+        let title = String::from(title);
         unsafe {
-            let instance = GetModuleHandleA(None).unwrap();
-            let window_class = PCSTR::from_raw(title.as_bytes().as_ptr());
+            tokio::spawn(async move {
+                let instance = GetModuleHandleA(None).unwrap();
+                let window_class = PCSTR::from_raw(title.as_bytes().as_ptr());
 
-            let wc = WNDCLASSA {
-                hCursor: LoadCursorW(None, IDC_ARROW).unwrap(),
-                hInstance: instance.into(),
-                lpszClassName: window_class,
+                let wc = WNDCLASSA {
+                    hCursor: LoadCursorW(None, IDC_ARROW).unwrap(),
+                    hInstance: instance.into(),
+                    lpszClassName: window_class,
 
-                style: CS_HREDRAW | CS_VREDRAW,
-                lpfnWndProc: Some(Self::wndproc),
-                ..Default::default()
-            };
+                    style: CS_HREDRAW | CS_VREDRAW,
+                    lpfnWndProc: Some(Self::wndproc),
+                    ..Default::default()
+                };
 
-            let atom = RegisterClassA(&wc);
-            debug_assert!(atom != 0);
+                let atom = RegisterClassA(&wc);
+                debug_assert!(atom != 0);
 
-            let hwnd = CreateWindowExA(
-                WINDOW_EX_STYLE::default(),
-                window_class,
-                window_class,
-                WS_OVERLAPPED | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                None,
-                None,
-                instance,
-                None,
-            )
-            .unwrap();
+                let hwnd = CreateWindowExA(
+                    WINDOW_EX_STYLE::default(),
+                    window_class,
+                    window_class,
+                    WS_OVERLAPPED | WS_VISIBLE | WS_SYSMENU | WS_MINIMIZEBOX,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    CW_USEDEFAULT,
+                    None,
+                    None,
+                    instance,
+                    None,
+                )
+                .unwrap();
 
-            tokio::spawn(async {
                 log::warn!("TICK START");
                 let mut message = MSG::default();
+
+                log::warn!("{:?}", std::thread::current().id());
                 while GetMessageA(&mut message, None, 0, 0).into() {
                     log::trace!("{:?}", message);
                     DispatchMessageA(&message);
                 }
                 log::warn!("TICK END");
             });
-
-            Ok(WindowWin32 { hwnd })
+            Err(Error::Other("Thread issue isn`t solved".to_owned()))
+            //Ok(WindowWin32 { hwnd })
         }
     }
 }

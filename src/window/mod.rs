@@ -11,4 +11,5 @@ pub trait Window {
 
 pub enum Handle{
     Win32(HWND),
+    Custom(i32)
 }

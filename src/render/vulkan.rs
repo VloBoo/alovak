@@ -1,7 +1,7 @@
 use ash::{
     ext::debug_utils,
-    khr::win32_surface,
-    vk::{self, SurfaceKHR},
+    khr::{surface, win32_surface},
+    vk::{self, QueueFlags, SurfaceKHR},
     Entry, Instance,
 };
 use std::{
@@ -9,15 +9,15 @@ use std::{
     ffi::{self, c_char},
 };
 
-use crate::{window::win32::WindowWin32, Handle};
+use crate::error::Result;
+use crate::Handle;
 
 pub struct Vulkan {}
 
 impl Vulkan {
-    pub fn init(handle: Handle) -> Result<Self, ()> {
-        let layer_names = vec![b"VK_LAYER_KHRONOS_validation\0"];
-
-        let layers_names_raw: Vec<*const c_char> = layer_names
+    pub fn init(handle: Handle) -> Result<Self> {
+        log::warn!("{:?}", std::thread::current().id());
+        let layer_names = vec![b"VK_LAYER_KHRONOS_validation\0"]
             .into_iter()
             .map(|raw_name| unsafe { ffi::CStr::from_bytes_with_nul_unchecked(raw_name).as_ptr() })
             .collect();
@@ -26,9 +26,12 @@ impl Vulkan {
             b"VK_EXT_debug_utils\0  ",
             b"VK_KHR_win32_surface\0",
             b"VK_KHR_surface\0      ",
-        ];
+        ]
+        .into_iter()
+        .map(|raw_name| unsafe { ffi::CStr::from_bytes_with_nul_unchecked(raw_name).as_ptr() })
+        .collect();
 
-        let extensions_names_raw: Vec<*const c_char> = extension_names
+        let device_extension_names = vec![b"VK_KHR_swapchain\0"]
             .into_iter()
             .map(|raw_name| unsafe { ffi::CStr::from_bytes_with_nul_unchecked(raw_name).as_ptr() })
             .collect();
@@ -36,8 +39,7 @@ impl Vulkan {
         let entry = Entry::linked();
         log::trace!("vulkan entry created");
 
-        let instance =
-            Self::create_instance(&entry, layers_names_raw, extensions_names_raw).unwrap();
+        let instance = Self::create_instance(&entry, layer_names, extension_names).unwrap();
         log::trace!("vulkan instance created");
 
         Self::create_debug_utils_messenger(&entry, &instance);
@@ -46,6 +48,10 @@ impl Vulkan {
         let surface = Self::create_surface(&handle, &entry, &instance).unwrap();
         log::trace!("vulkan surface created");
 
+        let device =
+            Self::create_device(&entry, &instance, device_extension_names, &surface).unwrap();
+        log::trace!("vulkan device created");
+
         return Ok(Vulkan {});
     }
 
@@ -53,7 +59,7 @@ impl Vulkan {
         entry: &Entry,
         layer_names: Vec<*const c_char>,
         extension_names: Vec<*const c_char>,
-    ) -> Result<Instance, vk::Result> {
+    ) -> Result<Instance> {
         let app_name = ffi::CString::new("Alovan App").unwrap();
         let eng_name = ffi::CString::new("Alovan Eng").unwrap();
 
@@ -76,21 +82,36 @@ impl Vulkan {
             .enabled_extension_names(&extension_names)
             .flags(create_flags);
 
-        return unsafe { entry.create_instance(&create_info, None) };
+        return match unsafe { entry.create_instance(&create_info, None) } {
+            Ok(value) => Ok(value),
+            Err(error) => Err(crate::Error::Vulkan(error)),
+        };
     }
 
-    fn create_surface(
-        handle: &Handle,
-        entry: &Entry,
-        instance: &Instance,
-    ) -> Result<SurfaceKHR, vk::Result> {
+    fn create_surface(handle: &Handle, entry: &Entry, instance: &Instance) -> Result<SurfaceKHR> {
         match handle {
             Handle::Win32(h) => {
                 let win32_surface_create_info =
                     vk::Win32SurfaceCreateInfoKHR::default().hwnd(h.0 as isize);
                 let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
-                return unsafe {
+
+                return match unsafe {
                     win32_surface_loader.create_win32_surface(&win32_surface_create_info, None)
+                } {
+                    Ok(value) => Ok(value),
+                    Err(error) => Err(crate::Error::Vulkan(error)),
+                };
+            }
+            Handle::Custom(h) => {
+                let win32_surface_create_info =
+                    vk::Win32SurfaceCreateInfoKHR::default().hwnd(*h as isize);
+                let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
+
+                return match unsafe {
+                    win32_surface_loader.create_win32_surface(&win32_surface_create_info, None)
+                } {
+                    Ok(value) => Ok(value),
+                    Err(error) => Err(crate::Error::Vulkan(error)),
                 };
             }
             _ => {
@@ -99,8 +120,58 @@ impl Vulkan {
         }
     }
 
-    fn create_device() {
-        
+    fn create_device(
+        entry: &Entry,
+        instance: &Instance,
+        extension: Vec<*const i8>,
+        surface: &SurfaceKHR,
+    ) -> Result<()> {
+        // physical_devices
+        let physical_devices = unsafe { instance.enumerate_physical_devices() }.unwrap();
+
+        for physical_device in physical_devices {
+            let mut queue_id_present = None;
+            let mut queue_id_graphic = None;
+            let physical_device_property =
+                unsafe { instance.get_physical_device_properties(physical_device) };
+
+            let a = physical_device_property.device_name.map(|v| v as u8);
+            if let Some(pos) = a.iter().position(|&x| x == 0) {
+                let slice = &a[..pos];
+                let result = String::from_utf8_lossy(slice);
+                log::trace!("physical device name: {:?}", result);
+            }
+
+            let queue_family_properties =
+                unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+
+            'q: for (index, queue_family_property) in queue_family_properties.iter().enumerate() {
+                if queue_family_property
+                    .queue_flags
+                    .contains(QueueFlags::GRAPHICS)
+                {
+                    queue_id_graphic = Some(index as u32);
+                    break 'q;
+                }
+            }
+            'q: for (index, _queue_family_property) in queue_family_properties.iter().enumerate() {
+                if unsafe {
+                    surface::Instance::new(entry, instance)
+                        .get_physical_device_surface_support(
+                            physical_device,
+                            index as u32,
+                            *surface,
+                        )
+                        .unwrap()
+                } {
+                    queue_id_present = Some(index as u32);
+                    break 'q;
+                }
+            }
+            log::trace!("{:?}, {:?}", queue_id_graphic, queue_id_present);
+        }
+
+        Ok(())
     }
 
     fn create_debug_utils_messenger(entry: &Entry, instance: &Instance) {
@@ -118,7 +189,7 @@ impl Vulkan {
             .pfn_user_callback(Some(Self::vulkan_debug_callback));
 
         let debug_utils_loader = debug_utils::Instance::new(&entry, &instance);
-        let debug_call_back = unsafe {
+        let _debug_call_back = unsafe {
             debug_utils_loader
                 .create_debug_utils_messenger(&debug_info, None)
                 .unwrap()
