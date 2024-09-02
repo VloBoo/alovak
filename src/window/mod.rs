@@ -1,5 +1,3 @@
-use windows::Win32::Foundation::HWND;
-
 use crate::error::Result;
 
 pub mod win32;
@@ -10,6 +8,6 @@ pub trait Window {
 
 
 pub enum Handle{
-    Win32(HWND),
+    Win32(isize),
     Custom(i32)
 }

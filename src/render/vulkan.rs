@@ -16,7 +16,6 @@ pub struct Vulkan {}
 
 impl Vulkan {
     pub fn init(handle: Handle) -> Result<Self> {
-        log::warn!("{:?}", std::thread::current().id());
         let layer_names = vec![b"VK_LAYER_KHRONOS_validation\0"]
             .into_iter()
             .map(|raw_name| unsafe { ffi::CStr::from_bytes_with_nul_unchecked(raw_name).as_ptr() })
@@ -92,7 +91,7 @@ impl Vulkan {
         match handle {
             Handle::Win32(h) => {
                 let win32_surface_create_info =
-                    vk::Win32SurfaceCreateInfoKHR::default().hwnd(h.0 as isize);
+                    vk::Win32SurfaceCreateInfoKHR::default().hwnd(*h);
                 let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
 
                 return match unsafe {

@@ -1,18 +1,22 @@
+use std::sync::{Arc, Mutex};
+
 use windows::{
     core::*,
     Win32::{
-        self, Foundation::*, Graphics::Gdi::ValidateRect, System::LibraryLoader::GetModuleHandleA,
+        Foundation::*, Graphics::Gdi::ValidateRect, System::LibraryLoader::GetModuleHandleA,
         UI::WindowsAndMessaging::*,
     },
 };
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 
 use super::{Handle, Window};
 
 pub struct WindowWin32 {
     pub hwnd: HWND,
 }
+
+unsafe impl Send for WindowWin32 {}
 
 impl WindowWin32 {
     pub extern "system" fn wndproc(
@@ -44,7 +48,9 @@ impl WindowWin32 {
 
     pub fn create(title: &str) -> Result<Self> {
         let title = String::from(title);
+        let window_result: Arc<Mutex<Option<WindowWin32>>> = Arc::new(Mutex::new(None));
         unsafe {
+            let window_result_clone = window_result.clone();
             tokio::spawn(async move {
                 let instance = GetModuleHandleA(None).unwrap();
                 let window_class = PCSTR::from_raw(title.as_bytes().as_ptr());
@@ -78,6 +84,11 @@ impl WindowWin32 {
                 )
                 .unwrap();
 
+                {
+                    let mut window_result = window_result_clone.lock().unwrap();
+                    *window_result = Some(WindowWin32 { hwnd });
+                }
+
                 log::warn!("TICK START");
                 let mut message = MSG::default();
 
@@ -88,14 +99,16 @@ impl WindowWin32 {
                 }
                 log::warn!("TICK END");
             });
-            Err(Error::Other("Thread issue isn`t solved".to_owned()))
-            //Ok(WindowWin32 { hwnd })
+            std::thread::sleep(std::time::Duration::from_secs(1)); // 1 sec
+                                                                   //Err(Error::Other("Thread issue isn`t solved".to_owned()))
+            let x = window_result.lock().unwrap().take().unwrap();
+            Ok(x)
         }
     }
 }
 
 impl Window for WindowWin32 {
     fn handle(self) -> Result<Handle> {
-        Ok(Handle::Win32(self.hwnd))
+        Ok(Handle::Win32(self.hwnd.0 as isize))
     }
 }
