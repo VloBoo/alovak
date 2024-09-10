@@ -1,7 +1,7 @@
 use ash::{
     ext::debug_utils,
     khr::{surface, win32_surface},
-    vk::{self, DebugUtilsMessengerEXT, DeviceQueueCreateInfo, QueueFlags, SurfaceKHR},
+    vk::{self, DebugUtilsMessengerEXT, DeviceQueueCreateInfo, Queue, QueueFlags, SurfaceKHR},
     Device, Entry, Instance,
 };
 use std::{
@@ -48,7 +48,7 @@ impl Vulkan {
         let surface = Self::create_surface(&handle, &entry, &instance).unwrap();
         log::trace!("vulkan surface created");
 
-        let device =
+        let (device, queue_graphic, queue_present) =
             Self::create_device(&entry, &instance, device_extension_names, &surface).unwrap();
         log::trace!("vulkan device created");
 
@@ -110,7 +110,7 @@ impl Vulkan {
                     win32_surface_loader.create_win32_surface(&win32_surface_create_info, None)
                 } {
                     Ok(value) => Ok(value),
-                    Err(error) => Err(crate::Error::Vulkan(error)),
+                    Err(error) => Err(Error::Vulkan(error)),
                 };
             }
             _ => {
@@ -124,22 +124,13 @@ impl Vulkan {
         instance: &Instance,
         extension: Vec<*const i8>,
         surface: &SurfaceKHR,
-    ) -> Result<Device> {
-        // physical_devices
+    ) -> Result<(Device, Queue, Queue)> {
         let physical_devices = unsafe { instance.enumerate_physical_devices() }.unwrap();
 
         for physical_device in physical_devices {
-            let mut queue_id_present = None;
-            let mut queue_id_graphic = None;
-            let physical_device_property =
-                unsafe { instance.get_physical_device_properties(physical_device) };
-
-            let a = physical_device_property.device_name.map(|v| v as u8);
-            if let Some(pos) = a.iter().position(|&x| x == 0) {
-                let slice = &a[..pos];
-                let result = String::from_utf8_lossy(slice);
-                log::trace!("physical device name: {:?}", result);
-            }
+            let mut queue_family_id_present = None;
+            let mut queue_family_id_graphic = None;
+            //let physical_device_property = unsafe { instance.get_physical_device_properties(physical_device) };
 
             let queue_family_properties =
                 unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
@@ -149,7 +140,7 @@ impl Vulkan {
                     .queue_flags
                     .contains(QueueFlags::GRAPHICS)
                 {
-                    queue_id_graphic = Some(index as u32);
+                    queue_family_id_graphic = Some(index as u32);
                     break 'q;
                 }
             }
@@ -163,28 +154,27 @@ impl Vulkan {
                         )
                         .unwrap()
                 } {
-                    queue_id_present = Some(index as u32);
+                    queue_family_id_present = Some(index as u32);
                     break 'q;
                 }
             }
-            log::trace!("{:?}, {:?}", queue_id_graphic, queue_id_present);
 
-            let mut queue_ids = HashSet::new();
-
-            match queue_id_graphic {
-                Some(value) => queue_ids.insert(value),
-                None => return Err(Error::Other("Queue dont found".to_owned())),
-            };
-            match queue_id_present {
-                Some(value) => queue_ids.insert(value),
-                None => return Err(Error::Other("Queue dont found".to_owned())),
+            let (Some(queue_family_id_graphic), Some(queue_family_id_present)) =
+                (queue_family_id_graphic, queue_family_id_present)
+            else {
+                return Err(Error::Other("Queue dont found".to_owned()));
             };
 
-            let queue_create_infos: Vec<DeviceQueueCreateInfo> = queue_ids
+            let mut queue_family_ids = HashSet::new();
+            queue_family_ids.insert(queue_family_id_graphic);
+            queue_family_ids.insert(queue_family_id_present);
+
+            let queue_create_infos: Vec<DeviceQueueCreateInfo> = queue_family_ids
                 .iter()
                 .map(|id| {
-                    let mut queue_create_info =
-                        DeviceQueueCreateInfo::default().queue_family_index(*id).queue_priorities(&[1.0f32; 1]);
+                    let mut queue_create_info = DeviceQueueCreateInfo::default()
+                        .queue_family_index(*id)
+                        .queue_priorities(&[1.0f32; 1]);
                     queue_create_info.queue_count = 1;
                     queue_create_info
                 })
@@ -193,12 +183,17 @@ impl Vulkan {
             let device_create_info =
                 vk::DeviceCreateInfo::default().queue_create_infos(&queue_create_infos);
 
-            return match unsafe {
-                instance.create_device(physical_device, &device_create_info, None)
-            } {
-                Ok(value) => Ok(value),
-                Err(error) => Err(Error::Vulkan(error)),
-            };
+            let device =
+                match unsafe { instance.create_device(physical_device, &device_create_info, None) }
+                {
+                    Ok(value) => value,
+                    Err(error) => return Err(Error::Vulkan(error)),
+                };
+
+            let queue_graphic = unsafe { device.get_device_queue(queue_family_id_graphic, 0) };
+            let queue_present = unsafe { device.get_device_queue(queue_family_id_present, 0) };
+
+            return Ok((device, queue_graphic, queue_present));
         }
 
         Err(Error::Other("Device dont found".to_owned()))
