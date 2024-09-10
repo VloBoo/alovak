@@ -1,16 +1,17 @@
 use ash::{
     ext::debug_utils,
     khr::{surface, win32_surface},
-    vk::{self, QueueFlags, SurfaceKHR},
-    Entry, Instance,
+    vk::{self, DebugUtilsMessengerEXT, DeviceQueueCreateInfo, QueueFlags, SurfaceKHR},
+    Device, Entry, Instance,
 };
 use std::{
     borrow::Cow,
+    collections::HashSet,
     ffi::{self, c_char},
 };
 
-use crate::error::Result;
 use crate::Handle;
+use crate::{error::Result, Error};
 
 pub struct Vulkan {}
 
@@ -41,7 +42,7 @@ impl Vulkan {
         let instance = Self::create_instance(&entry, layer_names, extension_names).unwrap();
         log::trace!("vulkan instance created");
 
-        Self::create_debug_utils_messenger(&entry, &instance);
+        let debug_utils = Self::create_debug_utils_messenger(&entry, &instance).unwrap();
         log::trace!("vulkan debug utils messenger created");
 
         let surface = Self::create_surface(&handle, &entry, &instance).unwrap();
@@ -90,8 +91,7 @@ impl Vulkan {
     fn create_surface(handle: &Handle, entry: &Entry, instance: &Instance) -> Result<SurfaceKHR> {
         match handle {
             Handle::Win32(h) => {
-                let win32_surface_create_info =
-                    vk::Win32SurfaceCreateInfoKHR::default().hwnd(*h);
+                let win32_surface_create_info = vk::Win32SurfaceCreateInfoKHR::default().hwnd(*h);
                 let win32_surface_loader = win32_surface::Instance::new(&entry, &instance);
 
                 return match unsafe {
@@ -124,7 +124,7 @@ impl Vulkan {
         instance: &Instance,
         extension: Vec<*const i8>,
         surface: &SurfaceKHR,
-    ) -> Result<()> {
+    ) -> Result<Device> {
         // physical_devices
         let physical_devices = unsafe { instance.enumerate_physical_devices() }.unwrap();
 
@@ -168,12 +168,46 @@ impl Vulkan {
                 }
             }
             log::trace!("{:?}, {:?}", queue_id_graphic, queue_id_present);
+
+            let mut queue_ids = HashSet::new();
+
+            match queue_id_graphic {
+                Some(value) => queue_ids.insert(value),
+                None => return Err(Error::Other("Queue dont found".to_owned())),
+            };
+            match queue_id_present {
+                Some(value) => queue_ids.insert(value),
+                None => return Err(Error::Other("Queue dont found".to_owned())),
+            };
+
+            let queue_create_infos: Vec<DeviceQueueCreateInfo> = queue_ids
+                .iter()
+                .map(|id| {
+                    let mut queue_create_info =
+                        DeviceQueueCreateInfo::default().queue_family_index(*id).queue_priorities(&[1.0f32; 1]);
+                    queue_create_info.queue_count = 1;
+                    queue_create_info
+                })
+                .collect();
+
+            let device_create_info =
+                vk::DeviceCreateInfo::default().queue_create_infos(&queue_create_infos);
+
+            return match unsafe {
+                instance.create_device(physical_device, &device_create_info, None)
+            } {
+                Ok(value) => Ok(value),
+                Err(error) => Err(Error::Vulkan(error)),
+            };
         }
 
-        Ok(())
+        Err(Error::Other("Device dont found".to_owned()))
     }
 
-    fn create_debug_utils_messenger(entry: &Entry, instance: &Instance) {
+    fn create_debug_utils_messenger(
+        entry: &Entry,
+        instance: &Instance,
+    ) -> Result<DebugUtilsMessengerEXT> {
         let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::default()
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
@@ -188,11 +222,11 @@ impl Vulkan {
             .pfn_user_callback(Some(Self::vulkan_debug_callback));
 
         let debug_utils_loader = debug_utils::Instance::new(&entry, &instance);
-        let _debug_call_back = unsafe {
+        return Ok(unsafe {
             debug_utils_loader
                 .create_debug_utils_messenger(&debug_info, None)
                 .unwrap()
-        };
+        });
     }
 
     unsafe extern "system" fn vulkan_debug_callback(
