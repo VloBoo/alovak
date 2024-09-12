@@ -1,7 +1,11 @@
 use ash::{
     ext::debug_utils,
-    khr::{surface, win32_surface},
-    vk::{self, DebugUtilsMessengerEXT, DeviceQueueCreateInfo, Queue, QueueFlags, SurfaceKHR},
+    khr::{surface, swapchain, win32_surface},
+    vk::{
+        self, ColorSpaceKHR, CompositeAlphaFlagsKHR, DebugUtilsMessengerEXT, DeviceQueueCreateInfo,
+        Format, ImageUsageFlags, PhysicalDevice, PresentModeKHR, Queue, QueueFlags, SharingMode,
+        SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+    },
     Device, Entry, Instance,
 };
 use std::{
@@ -48,9 +52,24 @@ impl Vulkan {
         let surface = Self::create_surface(&handle, &entry, &instance).unwrap();
         log::trace!("vulkan surface created");
 
-        let (device, queue_graphic, queue_present) =
-            Self::create_device(&entry, &instance, device_extension_names, &surface).unwrap();
+        let (
+            device,
+            physical_device,
+            (queue_graphic, queue_graphic_index),
+            (queue_present, queue_present_index),
+        ) = Self::create_device(&entry, &instance, device_extension_names, &surface).unwrap();
         log::trace!("vulkan device created");
+
+        let swapchain = Self::create_swapchain(
+            &entry,
+            &instance,
+            &surface,
+            &physical_device,
+            &device,
+            (queue_graphic_index, queue_present_index),
+        )
+        .unwrap();
+        log::trace!("vulkan swapchain created");
 
         return Ok(Vulkan {});
     }
@@ -124,13 +143,14 @@ impl Vulkan {
         instance: &Instance,
         extension: Vec<*const i8>,
         surface: &SurfaceKHR,
-    ) -> Result<(Device, Queue, Queue)> {
+    ) -> Result<(Device, PhysicalDevice, (Queue, u32), (Queue, u32))> {
+        let instance_surface = surface::Instance::new(entry, instance);
+
         let physical_devices = unsafe { instance.enumerate_physical_devices() }.unwrap();
 
         for physical_device in physical_devices {
             let mut queue_family_id_present = None;
             let mut queue_family_id_graphic = None;
-            //let physical_device_property = unsafe { instance.get_physical_device_properties(physical_device) };
 
             let queue_family_properties =
                 unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
@@ -146,7 +166,7 @@ impl Vulkan {
             }
             'q: for (index, _queue_family_property) in queue_family_properties.iter().enumerate() {
                 if unsafe {
-                    surface::Instance::new(entry, instance)
+                    instance_surface
                         .get_physical_device_surface_support(
                             physical_device,
                             index as u32,
@@ -180,8 +200,9 @@ impl Vulkan {
                 })
                 .collect();
 
-            let device_create_info =
-                vk::DeviceCreateInfo::default().queue_create_infos(&queue_create_infos);
+            let device_create_info = vk::DeviceCreateInfo::default()
+                .queue_create_infos(&queue_create_infos)
+                .enabled_extension_names(&extension);
 
             let device =
                 match unsafe { instance.create_device(physical_device, &device_create_info, None) }
@@ -193,10 +214,102 @@ impl Vulkan {
             let queue_graphic = unsafe { device.get_device_queue(queue_family_id_graphic, 0) };
             let queue_present = unsafe { device.get_device_queue(queue_family_id_present, 0) };
 
-            return Ok((device, queue_graphic, queue_present));
+            return Ok((
+                device,
+                physical_device,
+                (queue_graphic, queue_family_id_graphic),
+                (queue_present, queue_family_id_present),
+            ));
         }
 
         Err(Error::Other("Device dont found".to_owned()))
+    }
+
+    fn create_swapchain(
+        entry: &Entry,
+        instance: &Instance,
+        surface: &SurfaceKHR,
+        physical_device: &PhysicalDevice,
+        device: &Device,
+        (queue_graphic_index, queue_present_index): (u32, u32),
+    ) -> Result<SwapchainKHR> {
+        let instance_surface = surface::Instance::new(entry, instance);
+
+        let surface_capability = unsafe {
+            instance_surface.get_physical_device_surface_capabilities(*physical_device, *surface)
+        }
+        .unwrap();
+        let surface_formats = unsafe {
+            instance_surface.get_physical_device_surface_formats(*physical_device, *surface)
+        }
+        .unwrap();
+        let surface_present_mods = unsafe {
+            instance_surface.get_physical_device_surface_present_modes(*physical_device, *surface)
+        }
+        .unwrap();
+
+        let mut image_format = surface_formats.first().unwrap();
+        'q: for surface_format_inloop in surface_formats.iter() {
+            if surface_format_inloop.format == Format::B8G8R8A8_UNORM
+                && surface_format_inloop.color_space == ColorSpaceKHR::SRGB_NONLINEAR
+            {
+                image_format = surface_format_inloop;
+                break 'q;
+            }
+        }
+
+        let mut image_present_mode = PresentModeKHR::FIFO;
+        'q: for surface_present_mode_inloop in surface_present_mods.iter() {
+            if surface_present_mode_inloop == &PresentModeKHR::MAILBOX {
+                image_present_mode = PresentModeKHR::MAILBOX;
+                break 'q;
+            }
+        }
+
+        let mut image_count = surface_capability.min_image_count + 1;
+
+        if surface_capability.max_image_count > 0
+            && image_count > surface_capability.max_image_count
+        {
+            image_count = surface_capability.max_image_count;
+        }
+
+        log::trace!("Capability: {:?}", surface_capability);
+        log::trace!("Formats: {:?}", surface_formats);
+        log::trace!("Present Mods: {:?}", surface_present_mods);
+
+        let instance_swapchain = swapchain::Device::new(instance, device);
+
+        let mut swapchain_create_info = SwapchainCreateInfoKHR::default()
+            .surface(*surface)
+            .min_image_count(image_count)
+            .image_format(image_format.format)
+            .image_color_space(image_format.color_space)
+            .image_extent(surface_capability.current_extent)
+            .image_array_layers(1)
+            .image_usage(ImageUsageFlags::COLOR_ATTACHMENT)
+            .pre_transform(surface_capability.current_transform)
+            .composite_alpha(CompositeAlphaFlagsKHR::OPAQUE)
+            .present_mode(image_present_mode)
+            .clipped(true)
+            .old_swapchain(SwapchainKHR::default());
+
+        let queue_indexes = &[queue_graphic_index, queue_present_index];
+
+        if queue_graphic_index != queue_present_index {
+            swapchain_create_info = swapchain_create_info
+                .image_sharing_mode(SharingMode::CONCURRENT)
+                .queue_family_indices(queue_indexes);
+        } else {
+            swapchain_create_info = swapchain_create_info
+                .image_sharing_mode(SharingMode::EXCLUSIVE)
+                .queue_family_indices(&[]);
+        }
+
+        let swapchain =
+            unsafe { instance_swapchain.create_swapchain(&swapchain_create_info, None) }.unwrap();
+
+        Ok(swapchain)
     }
 
     fn create_debug_utils_messenger(
