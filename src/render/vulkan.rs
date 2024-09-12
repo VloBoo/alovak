@@ -2,9 +2,11 @@ use ash::{
     ext::debug_utils,
     khr::{surface, swapchain, win32_surface},
     vk::{
-        self, ColorSpaceKHR, CompositeAlphaFlagsKHR, DebugUtilsMessengerEXT, DeviceQueueCreateInfo,
-        Format, ImageUsageFlags, PhysicalDevice, PresentModeKHR, Queue, QueueFlags, SharingMode,
-        SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DebugUtilsMessengerEXT,
+        DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
+        ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, PFN_vkCreateImageView,
+        PhysicalDevice, PresentModeKHR, Queue, QueueFlags, SharingMode, SurfaceKHR,
+        SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device, Entry, Instance,
 };
@@ -60,7 +62,7 @@ impl Vulkan {
         ) = Self::create_device(&entry, &instance, device_extension_names, &surface).unwrap();
         log::trace!("vulkan device created");
 
-        let swapchain = Self::create_swapchain(
+        let (swapchain, images) = Self::create_swapchain(
             &entry,
             &instance,
             &surface,
@@ -232,7 +234,7 @@ impl Vulkan {
         physical_device: &PhysicalDevice,
         device: &Device,
         (queue_graphic_index, queue_present_index): (u32, u32),
-    ) -> Result<SwapchainKHR> {
+    ) -> Result<(SwapchainKHR, Vec<ImageView>)> {
         let instance_surface = surface::Instance::new(entry, instance);
 
         let surface_capability = unsafe {
@@ -274,9 +276,9 @@ impl Vulkan {
             image_count = surface_capability.max_image_count;
         }
 
-        log::trace!("Capability: {:?}", surface_capability);
-        log::trace!("Formats: {:?}", surface_formats);
-        log::trace!("Present Mods: {:?}", surface_present_mods);
+        //log::trace!("Capability: {:?}", surface_capability);
+        //log::trace!("Formats: {:?}", surface_formats);
+        //log::trace!("Present Mods: {:?}", surface_present_mods);
 
         let instance_swapchain = swapchain::Device::new(instance, device);
 
@@ -309,7 +311,29 @@ impl Vulkan {
         let swapchain =
             unsafe { instance_swapchain.create_swapchain(&swapchain_create_info, None) }.unwrap();
 
-        Ok(swapchain)
+        let images = unsafe { instance_swapchain.get_swapchain_images(swapchain) }.unwrap();
+
+        let image_views: Vec<ImageView> = images
+            .iter()
+            .map(|image| {
+                let image_view_create_info = ImageViewCreateInfo::default()
+                    .image(*image)
+                    .view_type(ImageViewType::TYPE_2D)
+                    .format(image_format.format)
+                    //.components(ComponentMapping::default())
+                    .subresource_range(
+                        ImageSubresourceRange::default()
+                            .aspect_mask(ImageAspectFlags::COLOR)
+                            .base_mip_level(0)
+                            .level_count(1)
+                            .base_array_layer(0)
+                            .layer_count(1),
+                    );
+                return unsafe { device.create_image_view(&image_view_create_info, None) }.unwrap();
+            })
+            .collect();
+
+        Ok((swapchain, image_views))
     }
 
     fn create_debug_utils_messenger(
@@ -320,7 +344,7 @@ impl Vulkan {
             .message_severity(
                 vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
                     | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+                    //| vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
             )
             .message_type(
                 vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
