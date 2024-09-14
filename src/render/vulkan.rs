@@ -2,11 +2,10 @@ use ash::{
     ext::debug_utils,
     khr::{surface, swapchain, win32_surface},
     vk::{
-        self, ColorSpaceKHR, ComponentMapping, CompositeAlphaFlagsKHR, DebugUtilsMessengerEXT,
-        DeviceQueueCreateInfo, Format, Image, ImageAspectFlags, ImageSubresourceRange,
-        ImageUsageFlags, ImageView, ImageViewCreateInfo, ImageViewType, PFN_vkCreateImageView,
-        PhysicalDevice, PresentModeKHR, Queue, QueueFlags, SharingMode, SurfaceKHR,
-        SwapchainCreateInfoKHR, SwapchainKHR,
+        self, ColorSpaceKHR, CompositeAlphaFlagsKHR, DebugUtilsMessengerEXT, DeviceQueueCreateInfo,
+        Format, ImageAspectFlags, ImageSubresourceRange, ImageUsageFlags, ImageView,
+        ImageViewCreateInfo, ImageViewType, PhysicalDevice, PresentModeKHR, Queue, QueueFlags,
+        SharingMode, SurfaceKHR, SwapchainCreateInfoKHR, SwapchainKHR,
     },
     Device, Entry, Instance,
 };
